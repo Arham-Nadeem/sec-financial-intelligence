@@ -1,0 +1,26 @@
+#Starter benchmark questions for retrieval evaluation; expand with company-specific labels after ingestion.
+questions:
+  - id: risk_supply_chain
+    question: "What supply-chain, sourcing, or manufacturing risks does management identify?"
+    expected_sections: ["item_1a", "part_ii_item_1a"]
+    expected_keywords: ["supply", "manufacturing", "supplier"]
+
+  - id: management_results
+    question: "What factors does management say drove changes in revenue or operating results?"
+    expected_sections: ["item_7", "part_i_item_2"]
+    expected_keywords: ["revenue", "operating", "results"]
+
+  - id: competition
+    question: "How does the company describe competitive pressure and the markets in which it competes?"
+    expected_sections: ["item_1", "item_1a"]
+    expected_keywords: ["competition", "competitive"]
+
+  - id: liquidity_cash
+    question: "What does management say about liquidity, cash flows, and capital resources?"
+    expected_sections: ["item_7", "part_i_item_2"]
+    expected_keywords: ["liquidity", "cash", "capital"]
+
+  - id: ai_language
+    question: "Find references to artificial intelligence or machine learning and explain the surrounding business context."
+    expected_sections: ["item_1", "item_1a", "item_7", "part_i_item_2"]
+    expected_keywords: ["artificial intelligence", "machine learning"]

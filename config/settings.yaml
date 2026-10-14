@@ -1,0 +1,33 @@
+#Default runtime configuration for SEC ingestion, retrieval, and evaluation.
+sec:
+  user_agent: "Your Name your.email@example.com"
+  max_requests_per_second: 5
+  forms: ["10-K", "10-Q"]
+  max_filings_per_form: 6
+
+retrieval:
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  chunk_size_words: 220
+  chunk_overlap_words: 40
+  vector_weight: 0.55
+  bm25_weight: 0.45
+  candidate_k: 20
+  top_k: 6
+  use_reranker: true
+
+analytics:
+  concepts:
+    revenue:
+      - RevenueFromContractWithCustomerExcludingAssessedTax
+      - Revenues
+      - SalesRevenueNet
+    operating_income:
+      - OperatingIncomeLoss
+    net_income:
+      - NetIncomeLoss
+      - ProfitLoss
+    operating_cash_flow:
+      - NetCashProvidedByUsedInOperatingActivities
+    capex:
+      - PaymentsToAcquirePropertyPlantAndEquipment
