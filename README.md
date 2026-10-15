@@ -163,6 +163,8 @@ sec-financial-intelligence/
 ├── scripts/
 │   ├── build_company.py
 │   ├── evaluate_retrieval.py
+│   ├── ingest_sec.py
+│   ├── parse_filings.py
 │   └── run_app.py
 ├── src/sec_intelligence/
 │   ├── analytics/
@@ -174,10 +176,12 @@ sec-financial-intelligence/
 │   │   └── runner.py
 │   ├── ingestion/
 │   │   ├── cache.py
+│   │   ├── pipeline.py
 │   │   └── sec_client.py
 │   ├── parsing/
 │   │   ├── chunker.py
-│   │   └── filing_parser.py
+│   │   ├── filing_parser.py
+│   │   └── pipeline.py
 │   ├── retrieval/
 │   │   └── hybrid.py
 │   ├── ui/

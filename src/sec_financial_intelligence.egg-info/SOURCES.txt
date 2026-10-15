@@ -24,6 +24,7 @@ src/sec_intelligence/ingestion/sec_client.py
 src/sec_intelligence/parsing/__init__.py
 src/sec_intelligence/parsing/chunker.py
 src/sec_intelligence/parsing/filing_parser.py
+src/sec_intelligence/parsing/pipeline.py
 src/sec_intelligence/retrieval/__init__.py
 src/sec_intelligence/retrieval/hybrid.py
 src/sec_intelligence/ui/__init__.py

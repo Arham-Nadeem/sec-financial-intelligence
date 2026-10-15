@@ -66,6 +66,7 @@ def ingest_company_raw(
                 "filing_date": filing.filing_date.isoformat(),
                 "report_date": filing.report_date.isoformat() if filing.report_date else "",
                 "source_url": filing.filing_url,
+                "primary_document": filing.primary_document,
                 "local_path": relative_path,
             }
         )
