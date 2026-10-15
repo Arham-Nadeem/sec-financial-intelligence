@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: sec-financial-intelligence
+Version: 0.1.0
+Summary: Structured financial analytics and source-grounded SEC filing research.
+Requires-Python: >=3.11
+License-File: LICENSE
+Requires-Dist: beautifulsoup4>=4.12
+Requires-Dist: faiss-cpu>=1.8
+Requires-Dist: numpy>=1.26
+Requires-Dist: pandas>=2.2
+Requires-Dist: pydantic>=2.8
+Requires-Dist: PyYAML>=6.0
+Requires-Dist: rank-bm25>=0.2.2
+Requires-Dist: requests>=2.32
+Requires-Dist: scikit-learn>=1.5
+Requires-Dist: sentence-transformers>=3.0
+Requires-Dist: streamlit>=1.38
+Requires-Dist: tenacity>=8.5
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Requires-Dist: ruff>=0.6; extra == "dev"
+Provides-Extra: ollama
+Requires-Dist: ollama>=0.3; extra == "ollama"
+Dynamic: license-file

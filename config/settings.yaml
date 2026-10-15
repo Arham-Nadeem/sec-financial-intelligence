@@ -1,6 +1,6 @@
 #Default runtime configuration for SEC ingestion, retrieval, and evaluation.
 sec:
-  user_agent: "Your Name your.email@example.com"
+  user_agent: "Your Name your.email@example.com"  #Replace locally or set SEC_USER_AGENT
   max_requests_per_second: 5
   forms: ["10-K", "10-Q"]
   max_filings_per_form: 6

@@ -12,19 +12,31 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from sec_intelligence.models import FilingMetadata
 
 
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SEC_COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+SEC_ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
+
+
 @dataclass
 class SecClient:
     user_agent: str
     max_requests_per_second: float = 5.0
 
     def __post_init__(self) -> None:
-        if "@" not in self.user_agent:
-            raise ValueError("SEC user_agent should identify you and include a contact email.")
+        placeholder_values = ("your name", "your.email", "example.com")
+        normalized = self.user_agent.lower()
+        if "@" not in self.user_agent or any(value in normalized for value in placeholder_values):
+            raise ValueError(
+                "Set sec.user_agent or SEC_USER_AGENT to your name and contact email "
+                "before accessing SEC EDGAR."
+            )
         self._session = requests.Session()
         self._session.headers.update(
             {
                 "User-Agent": self.user_agent,
                 "Accept-Encoding": "gzip, deflate",
+                "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
             }
         )
         self._last_request = 0.0
@@ -35,7 +47,7 @@ class SecClient:
         if elapsed < min_interval:
             time.sleep(min_interval - elapsed)
 
-    @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=0.5, max=8))
+    @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=0.5, max=8), reraise=True)
     def _get(self, url: str) -> requests.Response:
         self._throttle()
         response = self._session.get(url, timeout=30)
@@ -44,7 +56,7 @@ class SecClient:
         return response
 
     def ticker_map(self) -> dict[str, dict[str, Any]]:
-        data = self._get("https://www.sec.gov/files/company_tickers.json").json()
+        data = self._get(SEC_TICKERS_URL).json()
         return {row["ticker"].upper(): row for row in data.values()}
 
     def resolve_ticker(self, ticker: str) -> tuple[str, str]:
@@ -54,33 +66,34 @@ class SecClient:
         return str(row["cik_str"]).zfill(10), row["title"]
 
     def submissions(self, cik: str) -> dict[str, Any]:
-        return self._get(f"https://data.sec.gov/submissions/CIK{cik}.json").json()
+        return self._get(SEC_SUBMISSIONS_URL.format(cik=cik)).json()
 
     def company_facts(self, cik: str) -> dict[str, Any]:
-        return self._get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json").json()
+        return self._get(SEC_COMPANY_FACTS_URL.format(cik=cik)).json()
 
-    def list_filings(
-        self,
+    @staticmethod
+    def filings_from_submissions(
         ticker: str,
+        cik: str,
+        company_name: str,
+        submissions: dict[str, Any],
         forms: tuple[str, ...] = ("10-K", "10-Q"),
         max_per_form: int = 6,
     ) -> list[FilingMetadata]:
-        cik, company_name = self.resolve_ticker(ticker)
-        submissions = self.submissions(cik)
-        recent = submissions["filings"]["recent"]
+        recent = submissions.get("filings", {}).get("recent", {})
         counters = {form: 0 for form in forms}
         filings: list[FilingMetadata] = []
 
-        for idx, form in enumerate(recent["form"]):
+        for idx, form in enumerate(recent.get("form", [])):
             if form not in counters or counters[form] >= max_per_form:
                 continue
+
             accession = recent["accessionNumber"][idx]
-            accession_compact = accession.replace("-", "")
             primary_document = recent["primaryDocument"][idx]
+            accession_compact = accession.replace("-", "")
             cik_unpadded = str(int(cik))
-            url = (
-                f"https://www.sec.gov/Archives/edgar/data/{cik_unpadded}/"
-                f"{accession_compact}/{primary_document}"
+            filing_url = (
+                f"{SEC_ARCHIVES_BASE}/{cik_unpadded}/{accession_compact}/{primary_document}"
             )
             report_date_raw = recent["reportDate"][idx]
             filings.append(
@@ -93,13 +106,31 @@ class SecClient:
                     filing_date=date.fromisoformat(recent["filingDate"][idx]),
                     report_date=date.fromisoformat(report_date_raw) if report_date_raw else None,
                     primary_document=primary_document,
-                    filing_url=url,
+                    filing_url=filing_url,
                 )
             )
             counters[form] += 1
+
             if all(count >= max_per_form for count in counters.values()):
                 break
         return filings
+
+    def list_filings(
+        self,
+        ticker: str,
+        forms: tuple[str, ...] = ("10-K", "10-Q"),
+        max_per_form: int = 6,
+    ) -> list[FilingMetadata]:
+        cik, company_name = self.resolve_ticker(ticker)
+        submissions = self.submissions(cik)
+        return self.filings_from_submissions(
+            ticker=ticker,
+            cik=cik,
+            company_name=company_name,
+            submissions=submissions,
+            forms=forms,
+            max_per_form=max_per_form,
+        )
 
     def filing_html(self, filing: FilingMetadata) -> str:
         return self._get(filing.filing_url).text
