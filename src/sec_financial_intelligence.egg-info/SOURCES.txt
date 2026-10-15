@@ -26,11 +26,15 @@ src/sec_intelligence/parsing/chunker.py
 src/sec_intelligence/parsing/filing_parser.py
 src/sec_intelligence/parsing/pipeline.py
 src/sec_intelligence/retrieval/__init__.py
+src/sec_intelligence/retrieval/bm25.py
 src/sec_intelligence/retrieval/hybrid.py
+src/sec_intelligence/retrieval/vector.py
 src/sec_intelligence/ui/__init__.py
 src/sec_intelligence/ui/app.py
+tests/test_bm25.py
 tests/test_chunker.py
 tests/test_financials.py
 tests/test_metrics.py
 tests/test_parser.py
 tests/test_sec_client.py
+tests/test_vector.py
