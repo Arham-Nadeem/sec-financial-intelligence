@@ -1,0 +1,41 @@
+#Labeled Apple filing-retrieval benchmark for comparing lexical and semantic search strategies.
+questions:
+  - id: supply_chain_dependency
+    question: "How does Apple describe its dependence on outside suppliers and manufacturing partners?"
+    expected_sections: ["item_1a", "part_ii_item_1a"]
+    expected_keywords: ["supplier", "manufacturing", "outsourcing"]
+
+  - id: supply_chain_disruption
+    question: "What events could disrupt Apple's ability to manufacture or deliver products?"
+    expected_sections: ["item_1a", "part_ii_item_1a"]
+    expected_keywords: ["disruption", "manufacturing", "supply"]
+
+  - id: competitive_pressure
+    question: "How does Apple describe competition and pressure from competing products or pricing?"
+    expected_sections: ["item_1", "item_1a"]
+    expected_keywords: ["competition", "competitors", "pricing"]
+
+  - id: revenue_drivers
+    question: "What factors does management discuss when explaining changes in net sales or operating results?"
+    expected_sections: ["item_7", "part_i_item_2"]
+    expected_keywords: ["net sales", "operating", "revenue"]
+
+  - id: liquidity_capital
+    question: "What does management say about liquidity, cash flows, and capital resources?"
+    expected_sections: ["item_7", "part_i_item_2"]
+    expected_keywords: ["liquidity", "cash", "capital"]
+
+  - id: research_development
+    question: "How does Apple discuss research and development investment and product innovation?"
+    expected_sections: ["item_1", "item_1a", "item_7"]
+    expected_keywords: ["research", "development", "innovation"]
+
+  - id: cybersecurity_risk
+    question: "What cybersecurity or information-system risks does Apple identify?"
+    expected_sections: ["item_1a", "item_1c", "part_ii_item_1a"]
+    expected_keywords: ["cybersecurity", "security", "systems"]
+
+  - id: geographic_international_risk
+    question: "What risks arise from Apple's international operations and geopolitical exposure?"
+    expected_sections: ["item_1a", "part_ii_item_1a"]
+    expected_keywords: ["international", "geopolitical", "trade"]
