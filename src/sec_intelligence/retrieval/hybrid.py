@@ -1,109 +1,87 @@
-#Local BM25 plus semantic-vector retrieval with optional cross-encoder reranking.
+#Combine lexical and semantic SEC retrieval with weighted reciprocal-rank fusion.
 from __future__ import annotations
 
-import math
-import re
-from dataclasses import dataclass
-
-import faiss
-import numpy as np
-from rank_bm25 import BM25Okapi
-from sentence_transformers import CrossEncoder, SentenceTransformer
-
-from sec_intelligence.models import Chunk, RetrievalResult
+from sec_intelligence.models import RetrievalResult
+from sec_intelligence.retrieval.bm25 import BM25Retriever
+from sec_intelligence.retrieval.vector import VectorRetriever
 
 
-def tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
-
-
-def minmax(values: np.ndarray) -> np.ndarray:
-    if values.size == 0:
-        return values
-    low = float(values.min())
-    high = float(values.max())
-    if math.isclose(low, high):
-        return np.ones_like(values) if high > 0 else np.zeros_like(values)
-    return (values - low) / (high - low)
-
-
-@dataclass
 class HybridRetriever:
-    chunks: list[Chunk]
-    embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
-    reranker_model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    vector_weight: float = 0.55
-    bm25_weight: float = 0.45
-    use_reranker: bool = True
+    """Fuse BM25 and vector rankings without assuming comparable raw score scales."""
 
-    def __post_init__(self) -> None:
-        if not self.chunks:
-            raise ValueError("At least one chunk is required to build a retriever.")
-        self.encoder = SentenceTransformer(self.embedding_model_name)
-        corpus = [tokenize(chunk.text) for chunk in self.chunks]
-        self.bm25 = BM25Okapi(corpus)
-        embeddings = self.encoder.encode(
-            [chunk.text for chunk in self.chunks],
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        ).astype("float32")
-        self.index = faiss.IndexFlatIP(embeddings.shape[1])
-        self.index.add(embeddings)
-        self.reranker = CrossEncoder(self.reranker_model_name) if self.use_reranker else None
+    def __init__(
+        self,
+        bm25: BM25Retriever,
+        vector: VectorRetriever,
+        bm25_weight: float = 0.45,
+        vector_weight: float = 0.55,
+        rrf_k: int = 60,
+    ) -> None:
+        if bm25_weight < 0 or vector_weight < 0:
+            raise ValueError("Retrieval weights cannot be negative.")
+        if bm25_weight + vector_weight == 0:
+            raise ValueError("At least one retrieval weight must be positive.")
+        if rrf_k <= 0:
+            raise ValueError("rrf_k must be positive.")
+        if [chunk.chunk_id for chunk in bm25.chunks] != [chunk.chunk_id for chunk in vector.chunks]:
+            raise ValueError("BM25 and vector retrievers must use the same chunk collection.")
+
+        total = bm25_weight + vector_weight
+        self.bm25 = bm25
+        self.vector = vector
+        self.bm25_weight = bm25_weight / total
+        self.vector_weight = vector_weight / total
+        self.rrf_k = rrf_k
+        self.chunks = bm25.chunks
 
     def search(
         self,
         query: str,
-        candidate_k: int = 20,
-        top_k: int = 6,
-        mode: str = "hybrid",
-        apply_reranker: bool | None = None,
+        top_k: int = 5,
+        candidate_k: int = 30,
+        form: str | None = None,
+        section_id: str | None = None,
     ) -> list[RetrievalResult]:
-        candidate_k = min(candidate_k, len(self.chunks))
-        query_vector = self.encoder.encode(
-            [query], normalize_embeddings=True, show_progress_bar=False
-        ).astype("float32")
-        vector_scores, vector_ids = self.index.search(query_vector, candidate_k)
-        vector_lookup = {
-            int(idx): float(score) for idx, score in zip(vector_ids[0], vector_scores[0]) if idx >= 0
-        }
+        """Retrieve candidates from both engines and fuse them with weighted RRF."""
+        if not query.strip():
+            raise ValueError("Query cannot be empty.")
+        if top_k <= 0 or candidate_k <= 0:
+            raise ValueError("top_k and candidate_k must be positive.")
+        candidate_k = max(candidate_k, top_k)
 
-        bm25_scores = np.asarray(self.bm25.get_scores(tokenize(query)), dtype=float)
-        bm25_order = np.argsort(bm25_scores)[::-1][:candidate_k]
-        candidate_ids = sorted(set(vector_lookup) | {int(idx) for idx in bm25_order})
+        bm25_results = self.bm25.search(query, candidate_k, form=form, section_id=section_id)
+        vector_results = self.vector.search(query, candidate_k, form=form, section_id=section_id)
 
-        raw_vector = np.asarray([vector_lookup.get(idx, 0.0) for idx in candidate_ids], dtype=float)
-        raw_bm25 = np.asarray([bm25_scores[idx] for idx in candidate_ids], dtype=float)
-        norm_vector = minmax(raw_vector)
-        norm_bm25 = minmax(raw_bm25)
-        if mode == "vector":
-            hybrid = norm_vector
-        elif mode == "bm25":
-            hybrid = norm_bm25
-        elif mode == "hybrid":
-            hybrid = self.vector_weight * norm_vector + self.bm25_weight * norm_bm25
-        else:
-            raise ValueError("mode must be one of: vector, bm25, hybrid")
+        rows: dict[str, RetrievalResult] = {}
+        fusion_scores: dict[str, float] = {}
 
-        rows = []
-        for pos, idx in enumerate(candidate_ids):
-            rows.append(
-                RetrievalResult(
-                    chunk=self.chunks[idx],
-                    score=float(hybrid[pos]),
-                    vector_score=float(raw_vector[pos]),
-                    bm25_score=float(raw_bm25[pos]),
-                )
+        for rank, result in enumerate(bm25_results, start=1):
+            chunk_id = result.chunk.chunk_id
+            rows[chunk_id] = RetrievalResult(
+                chunk=result.chunk,
+                score=0.0,
+                bm25_score=result.bm25_score,
             )
-        rows.sort(key=lambda row: row.score, reverse=True)
-        rows = rows[:candidate_k]
+            fusion_scores[chunk_id] = fusion_scores.get(chunk_id, 0.0) + (
+                self.bm25_weight / (self.rrf_k + rank)
+            )
 
-        should_rerank = self.use_reranker if apply_reranker is None else apply_reranker
-        if self.reranker and should_rerank and rows:
-            pairs = [(query, row.chunk.text) for row in rows]
-            rerank_scores = self.reranker.predict(pairs)
-            for row, score in zip(rows, rerank_scores):
-                row.rerank_score = float(score)
-            rows.sort(key=lambda row: row.rerank_score or float("-inf"), reverse=True)
+        for rank, result in enumerate(vector_results, start=1):
+            chunk_id = result.chunk.chunk_id
+            if chunk_id not in rows:
+                rows[chunk_id] = RetrievalResult(
+                    chunk=result.chunk,
+                    score=0.0,
+                    vector_score=result.vector_score,
+                )
+            else:
+                rows[chunk_id].vector_score = result.vector_score
+            fusion_scores[chunk_id] = fusion_scores.get(chunk_id, 0.0) + (
+                self.vector_weight / (self.rrf_k + rank)
+            )
 
-        return rows[:top_k]
+        for chunk_id, result in rows.items():
+            result.score = fusion_scores[chunk_id]
+
+        ranked = sorted(rows.values(), key=lambda result: result.score, reverse=True)
+        return ranked[:top_k]
