@@ -1,152 +1,318 @@
 # SEC Financial Intelligence Platform
 
-A financial research system that combines structured SEC XBRL analytics with section-aware retrieval over 10-K and 10-Q filings.
+### Arham Nadeem
 
-The platform is designed to answer questions such as:
+An end-to-end financial research platform that combines **SEC filing ingestion, XBRL financial analytics, section-aware document parsing, lexical + semantic retrieval, local cross-encoder reranking, source-grounded research answers, and quantitative retrieval evaluation**.
 
-- How has management's discussion of supply-chain risk changed across recent filings?
+The project is built to answer questions such as:
+
+- How has management's discussion of supplier or manufacturing risk changed across filings?
 - What were the largest year-over-year changes in revenue, operating income, and free cash flow?
-- Where does management discuss artificial intelligence, and how has that language changed?
-- What factors does management identify as drivers of operating performance or liquidity?
+- Which filing passages best support a specific research question?
+- Does semantic retrieval outperform lexical search for paraphrased financial research queries?
 
-Unlike a generic PDF chatbot, the project separates **financial computation**, **document retrieval**, **ranking**, **source grounding**, and **evaluation** into testable components.
+Unlike a generic "upload a PDF and chat with it" application, the platform separates **financial computation**, **document retrieval**, **ranking**, **source grounding**, and **evaluation** into independently testable components.
+
+---
+
+## Platform Preview
+
+### Grounded Research Assistant
+
+![Grounded research assistant](screenshots/01_research_assistant.png)
+
+### Filing-to-Filing Comparison
+
+![Filing comparison](screenshots/02_filing_comparison.png)
+
+### Structured Financial Trends
+
+![Financial trends](screenshots/03_financial_trends.png)
+
+### Evidence Explorer
+
+![Evidence explorer](screenshots/04_evidence_explorer.png)
+
+### Retrieval Evaluation
+
+![Retrieval evaluation](screenshots/05_retrieval_evaluation.png)
+
+---
 
 ## Why This Project Exists
 
-Financial filings mix two different data problems:
+SEC filings combine two very different data problems:
 
-1. **Structured analysis** — financial facts, periods, units, and KPI calculations.
-2. **Unstructured research** — management commentary, risk disclosures, competitive language, and changes in narrative over time.
+1. **Structured financial analysis** — standardized financial facts, reporting periods, KPI calculations, and year-over-year trends.
+2. **Unstructured financial research** — management commentary, risk disclosures, competitive language, operational dependencies, and changes in narrative over time.
 
-A useful research system needs both. This project uses SEC Company Facts for standardized financial metrics while independently processing filing text for source-grounded research.
+A useful research system needs both. This project uses **SEC Company Facts / XBRL** for financial metrics while independently processing 10-K and 10-Q text for source-grounded research.
+
+The result is a research workflow where financial calculations do not depend on an LLM, and document answers remain traceable to the underlying SEC filing.
+
+---
 
 ## Architecture
 
-```text
-SEC EDGAR
-├── Company submissions API
-├── Filing HTML documents
-└── Company Facts XBRL API
-        │
-        ▼
-Ingestion + Local Cache
-        │
-        ├───────────────────────────────┐
-        ▼                               ▼
-Filing Text Pipeline                Financial Pipeline
-HTML cleanup                        XBRL concept mapping
-Section detection                   Period normalization
-Section-aware chunking              Annual KPI calculations
-Metadata preservation               YoY trend preparation
-        │                               │
-        ▼                               ▼
-Local Search Index                 Structured KPI tables
-BM25 + embeddings                         │
-        │                                  │
-        ├───────────────┐                  │
-        ▼               ▼                  │
-Hybrid ranking      Cross-encoder           │
-                    reranking               │
-        └───────────────┬───────────────────┘
-                        ▼
-              Research Interface
-          Ranked evidence + citations
-              Financial trend view
-                        │
-                        ▼
-                    Evaluation
-        Recall@K · MRR · nDCG · keyword hits
-        BM25 vs vector vs hybrid vs reranked
+```mermaid
+flowchart LR
+    A[SEC EDGAR] --> B[Ingestion + Local Cache]
+    B --> C[10-K / 10-Q HTML]
+    B --> D[Company Facts XBRL]
+
+    C --> E[HTML Cleanup]
+    E --> F[Section Detection]
+    F --> G[Section-Aware Chunking]
+
+    G --> H[BM25 Retrieval]
+    G --> I[Sentence Embeddings]
+    I --> J[FAISS Vector Search]
+
+    H --> K[Weighted Reciprocal Rank Fusion]
+    J --> K
+    K --> L[Cross-Encoder Reranker]
+    L --> M[Grounded Evidence + SEC Citations]
+
+    D --> N[Concept Mapping + Period Normalization]
+    N --> O[Revenue / OI / NI / OCF / CapEx / FCF]
+    O --> P[YoY Financial Trends]
+
+    M --> Q[Streamlit Research Workspace]
+    P --> Q
+
+    H --> R[Retrieval Evaluation]
+    J --> R
+    K --> R
+    L --> R
 ```
+
+### Research Pipeline
+
+```text
+Ticker
+  ↓
+SEC submissions + filing HTML + Company Facts
+  ↓
+Section-aware parsing and chunking
+  ↓
+BM25 lexical retrieval ──────────┐
+                                 ├─ Weighted RRF ─ Cross-encoder reranking
+Semantic embeddings + FAISS ────┘
+                                              ↓
+                                  Grounded SEC evidence
+                                              ↓
+                                   Citation-backed answer
+```
+
+---
 
 ## Core Technical Features
 
-### SEC filing ingestion
+### 1. SEC EDGAR Ingestion
 
 - Resolves ticker symbols to SEC CIK identifiers.
-- Retrieves recent 10-K and 10-Q metadata from SEC submissions data.
-- Downloads primary filing HTML from the SEC archives.
-- Uses a declared SEC user agent and configurable request throttling.
-- Stores downloaded source documents locally so repeated analysis does not repeatedly hit SEC endpoints.
+- Discovers recent 10-K and 10-Q filings from SEC submissions data.
+- Downloads primary filing HTML from SEC archives.
+- Retrieves structured Company Facts / XBRL data.
+- Uses a declared SEC user agent and conservative request throttling.
+- Caches source data locally to avoid unnecessary repeated requests.
+- Writes a manifest containing filing type, filing date, accession number, source URL, and local file path.
 
-### Section-aware filing parsing
+### 2. Section-Aware Filing Parsing
 
-Instead of splitting an entire filing into arbitrary windows, the parser first identifies filing sections such as:
+The parser identifies filing structure before chunking instead of splitting a filing into arbitrary fixed windows.
+
+Examples include:
 
 - Item 1 — Business
 - Item 1A — Risk Factors
 - Item 7 — Management's Discussion and Analysis
-- 10-Q Management's Discussion and Analysis
-- 10-Q Risk Factors
+- Item 7A — Quantitative and Qualitative Disclosures
+- 10-Q Part I / Part II sections
 
-Chunks retain:
+The parser also includes logic to avoid mistaking table-of-contents entries for the substantive filing section.
+
+Each research chunk preserves:
 
 - ticker
 - filing type
 - filing date
 - accession number
-- filing section
+- section ID and title
 - source URL
 - stable chunk ID
+- word count
 
-This metadata makes retrieval results explainable and citation-ready.
+### 3. Lexical Retrieval Baseline
 
-### Hybrid retrieval
+A dependency-light **Okapi BM25** implementation provides the lexical baseline. It is strong when a research query uses the same financial or filing terminology as the source document.
 
-The search layer combines:
+### 4. Local Semantic Retrieval
 
-- **BM25 lexical retrieval** for exact financial and filing terminology
-- **Sentence-transformer embeddings** for semantic similarity
-- **FAISS** for local vector search
-- **Weighted hybrid scoring** to combine lexical and semantic evidence
-- **Optional local cross-encoder reranking** for stronger final ranking
+The semantic layer uses:
 
-The default models run locally after downloading their model weights.
+- `sentence-transformers/all-MiniLM-L6-v2`
+- normalized sentence embeddings
+- FAISS inner-product search
+- persisted local vector indexes
+- chunk-file hashing to detect stale indexes
 
-### Structured financial analytics
+This allows paraphrased questions to retrieve relevant filing language even when the exact query words are absent.
 
-The platform reads SEC Company Facts and maps common US-GAAP concepts into normalized metrics including:
+### 5. Hybrid Retrieval
 
-- revenue
-- operating income
-- net income
-- operating cash flow
-- capital expenditures
-- free cash flow
+BM25 and vector scores are not directly comparable, so the project combines their **rank positions** using weighted Reciprocal Rank Fusion rather than naively adding raw scores.
 
-The analytics layer prepares annual observations and year-over-year comparisons without relying on an LLM to perform arithmetic.
+Default weighting:
 
-### Source-grounded research answers
+```text
+BM25:  45%
+Vector: 55%
+```
 
-The default answer layer is intentionally extractive and citation-first. Retrieved evidence is presented with:
+### 6. Local Cross-Encoder Reranking
+
+The top hybrid candidates can be reranked with:
+
+```text
+cross-encoder/ms-marco-MiniLM-L-6-v2
+```
+
+Unlike embedding retrieval, the cross-encoder reads the query and passage together, making it useful for improving the final ordering of a small candidate set.
+
+### 7. Structured XBRL Financial Analytics
+
+The financial layer normalizes SEC Company Facts into annual metrics including:
+
+- Revenue
+- Operating income
+- Net income
+- Operating cash flow
+- Capital expenditures
+- Free cash flow
+
+It also handles repeated comparative XBRL facts by retaining the most recently filed version of each economic period before calculating trends.
+
+Free cash flow is calculated as:
+
+```text
+Free Cash Flow = Operating Cash Flow - Capital Expenditures
+```
+
+### 8. Grounded Research Answers
+
+The default answer layer is deliberately **extractive and citation-first**.
+
+Each answer is tied to retrieved SEC evidence and includes:
 
 - filing type
 - filing date
 - filing section
-- chunk identifier
-- direct SEC source URL
+- chunk ID
+- direct SEC filing URL
 
-An LLM can be added later as an optional synthesis layer, but the retrieval and financial-analysis pipeline does not depend on one.
+The system also supports filing-to-filing comparison and can identify when the strongest disclosure language is effectively unchanged across years.
 
-## Retrieval Evaluation
+No paid LLM API is required for the core project.
 
-The repository includes a starter benchmark of filing-research questions and evaluates multiple strategies on the same question set.
+### 9. Retrieval Evaluation
+
+The repository contains a manually labeled Apple research benchmark and compares:
+
+1. BM25
+2. Vector retrieval
+3. Hybrid retrieval
+4. Hybrid + cross-encoder reranking
 
 Metrics include:
 
-- **Recall@K** — whether relevant filing sections were retrieved
-- **MRR** — how early the first relevant result appears
-- **nDCG@K** — ranking quality across the returned evidence
-- **Keyword Evidence Hit Rate** — whether expected evidence appears in the retrieved context
+- **Recall@5** — whether expected relevant sections were retrieved
+- **MRR** — how early the first relevant result appeared
+- **nDCG@5** — ranking quality across retrieved evidence
+- **Relevant Result Rate@5** — proportion of the top results matching labeled sections
+- **Keyword Hit@5** — whether expected evidence terminology appeared
 
-The evaluation script compares:
+---
 
-1. BM25 only
-2. Vector retrieval only
-3. Hybrid retrieval
-4. Hybrid retrieval + cross-encoder reranking
+## Measured Results
 
-This makes retrieval choices measurable rather than subjective.
+### AAPL Retrieval Benchmark
+
+Results from the included **8-question AAPL benchmark**:
+
+| Strategy | Recall@5 | MRR | nDCG@5 | Relevant Rate@5 | Keyword Hit@5 |
+|---|---:|---:|---:|---:|---:|
+| **Vector** | **0.833** | 0.838 | **0.754** | 0.750 | 0.917 |
+| **Hybrid** | 0.708 | **0.938** | 0.699 | 0.750 | 0.917 |
+| Hybrid + reranker | 0.708 | 0.844 | 0.684 | 0.750 | 0.917 |
+| BM25 | 0.667 | 0.823 | 0.625 | 0.725 | 0.917 |
+
+The benchmark shows that the more complex method does not automatically win every metric:
+
+- Vector retrieval achieved the strongest overall Recall@5 and nDCG@5.
+- Hybrid retrieval achieved the best MRR, placing a relevant result very high in the ranking.
+- The reranker improved individual queries but did not improve every aggregate metric.
+
+This evaluation is intentionally retained as measured rather than tuned to make the most complex strategy appear best.
+
+### Example AAPL Corpus Run
+
+A local run using two recent 10-Ks and two recent 10-Qs produced:
+
+```text
+Filings processed: 4
+Sections detected: 50
+Research chunks: 455
+```
+
+Example latest annual KPI snapshot (`2025-09-27`):
+
+| Metric | Value | YoY |
+|---|---:|---:|
+| Revenue | $416.2B | +6.4% |
+| Operating income | $133.1B | +8.0% |
+| Net income | $112.0B | +19.5% |
+| Operating cash flow | $111.5B | -5.7% |
+| Capital expenditures | $12.7B | +34.6% |
+| Free cash flow | $98.8B | -9.2% |
+
+---
+
+## Streamlit Research Workspace
+
+The application contains four integrated views.
+
+### Research Assistant
+
+- grounded SEC research questions
+- citation precision and coverage checks
+- expandable source evidence
+- direct links to SEC filings
+- filing-to-filing comparison mode
+
+### Financial Trends
+
+- KPI cards
+- year-over-year changes
+- interactive metric selection
+- multi-year trend charts in USD billions
+- raw annual KPI and growth tables
+
+### Evidence Explorer
+
+- query SEC filing chunks directly
+- filter by filing type
+- inspect BM25, vector, hybrid, and reranker scores
+- toggle cross-encoder reranking
+- open the original SEC source
+
+### Retrieval Evaluation
+
+- inspect the labeled benchmark
+- compare retrieval strategies using one metric at a time
+- view Recall@5, MRR, nDCG@5, relevant-result rate, and keyword coverage
+
+---
 
 ## Project Structure
 
@@ -156,52 +322,52 @@ sec-financial-intelligence/
 │   └── settings.yaml
 ├── data/
 │   ├── evaluation/
-│   │   └── questions.yaml
+│   │   └── aapl_questions.yaml
 │   ├── indexes/
 │   ├── processed/
 │   └── raw/
+├── screenshots/
+│   ├── 01_research_assistant.png
+│   ├── 02_filing_comparison.png
+│   ├── 03_financial_trends.png
+│   ├── 04_evidence_explorer.png
+│   └── 05_retrieval_evaluation.png
 ├── scripts/
-│   ├── build_company.py
+│   ├── build_vector_index.py
+│   ├── compare_retrieval.py
 │   ├── evaluate_retrieval.py
+│   ├── extract_financials.py
 │   ├── ingest_sec.py
 │   ├── parse_filings.py
-│   └── run_app.py
+│   ├── research_sec.py
+│   ├── run_app.py
+│   ├── search_bm25.py
+│   ├── search_hybrid.py
+│   └── search_vector.py
 ├── src/sec_intelligence/
 │   ├── analytics/
-│   │   └── financials.py
 │   ├── answering/
-│   │   └── grounded.py
 │   ├── evaluation/
-│   │   ├── metrics.py
-│   │   └── runner.py
 │   ├── ingestion/
-│   │   ├── cache.py
-│   │   ├── pipeline.py
-│   │   └── sec_client.py
 │   ├── parsing/
-│   │   ├── chunker.py
-│   │   ├── filing_parser.py
-│   │   └── pipeline.py
 │   ├── retrieval/
-│   │   └── hybrid.py
 │   ├── ui/
-│   │   └── app.py
 │   ├── config.py
-│   ├── models.py
-│   └── pipeline.py
+│   └── models.py
 ├── tests/
-│   ├── test_chunker.py
-│   ├── test_financials.py
-│   ├── test_metrics.py
-│   └── test_parser.py
+├── .env.example
 ├── .gitignore
 ├── pyproject.toml
 └── README.md
 ```
 
+---
+
 ## Setup
 
 Python 3.11+ is recommended.
+
+### 1. Create a virtual environment
 
 ```bash
 python -m venv .venv
@@ -219,118 +385,188 @@ macOS/Linux:
 source .venv/bin/activate
 ```
 
-Install the project and development tools:
+### 2. Install the project
 
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-## Configure SEC Access
+### 3. Identify SEC requests
 
-Edit `config/settings.yaml` and replace the placeholder `user_agent` value with your name and contact email.
+The SEC asks automated clients to identify themselves. The recommended approach is an environment variable so personal contact information is not committed.
 
-Example:
+Windows PowerShell:
 
-```yaml
-sec:
-  user_agent: "Your Name your.email@example.com"
+```powershell
+$env:SEC_USER_AGENT="Your Name your.email@example.com"
 ```
 
-No SEC API key is required for the public data used by this project.
-
-## Build a Company Dataset
-
-Example using Apple:
+macOS/Linux:
 
 ```bash
-python scripts/build_company.py AAPL
+export SEC_USER_AGENT="Your Name your.email@example.com"
 ```
 
-This creates local processed artifacts such as:
+---
 
-```text
-data/processed/AAPL/chunks.jsonl
-data/processed/AAPL/financial_facts.csv
-data/processed/AAPL/annual_kpis.csv
-data/processed/AAPL/filings.json
-```
+## Build the AAPL Dataset
 
-Raw filing HTML and Company Facts responses are cached under `data/raw/AAPL/`.
-
-## Run the Retrieval Evaluation
+### Download filing data
 
 ```bash
-python scripts/evaluate_retrieval.py AAPL --k 5
+python scripts/ingest_sec.py AAPL --max-per-form 2
 ```
 
-The script writes per-strategy results and a comparison summary to:
+### Parse sections and chunks
 
-```text
-data/processed/AAPL/evaluation/
+```bash
+python scripts/parse_filings.py AAPL
 ```
 
-The benchmark in `data/evaluation/questions.yaml` is intentionally editable. A strong portfolio version should expand it with manually reviewed, company-specific questions and labels.
+### Extract financial KPIs
 
-## Run the Streamlit Interface
+```bash
+python scripts/extract_financials.py AAPL
+```
+
+### Build the semantic index
+
+```bash
+python scripts/build_vector_index.py AAPL
+```
+
+The first semantic-search run downloads the public sentence-transformer model. Model weights are then cached locally.
+
+### Evaluate retrieval
+
+```bash
+python scripts/evaluate_retrieval.py AAPL
+```
+
+### Launch the Streamlit app
 
 ```bash
 python scripts/run_app.py
 ```
 
-Or:
+---
+
+## CLI Research Examples
+
+BM25 baseline:
 
 ```bash
-python -m streamlit run src/sec_intelligence/ui/app.py
+python scripts/search_bm25.py AAPL "supply chain manufacturing risk"
 ```
 
-The initial interface includes:
+Semantic search:
 
-- Research Assistant
-- Financial Trends
-- Evidence Explorer
+```bash
+python scripts/search_vector.py AAPL "dependence on outside companies to make its products"
+```
+
+Hybrid + reranker:
+
+```bash
+python scripts/search_hybrid.py AAPL "supplier manufacturing disruption risk"
+```
+
+Compare retrieval strategies:
+
+```bash
+python scripts/compare_retrieval.py AAPL "dependence on outside companies to make its products"
+```
+
+Grounded answer:
+
+```bash
+python scripts/research_sec.py AAPL "How does Apple depend on outside companies for manufacturing?"
+```
+
+Compare filing language:
+
+```bash
+python scripts/research_sec.py AAPL "How has Apple discussed manufacturing and supplier risk over time?" --compare
+```
+
+---
 
 ## Testing
 
+Run the complete automated test suite with:
+
 ```bash
-pytest
+python -m pytest
 ```
 
-The tests cover section parsing, chunk metadata, structured financial calculations, and evaluation metrics without requiring live SEC requests.
+Tests cover areas including:
 
-## What Is Fully Free / Local
+- SEC URL and metadata handling
+- filing section detection
+- section-aware chunking
+- BM25 retrieval
+- vector retrieval
+- hybrid fusion
+- cross-encoder reranking behavior
+- XBRL financial calculations
+- ranking metrics
+- grounded citation logic
+- Streamlit presentation helpers
 
-After SEC documents and model weights are downloaded, the core analytics and search workflow runs locally.
+Live SEC requests and external model downloads are not required for the unit tests.
+
+---
+
+## Free / Local Design
 
 | Component | Implementation | Cost |
 |---|---|---:|
-| Filing metadata | SEC submissions data | Free |
+| Filing metadata | SEC EDGAR submissions | Free |
 | Filing documents | SEC EDGAR archives | Free |
-| Structured financial facts | SEC Company Facts | Free |
+| Structured financial facts | SEC Company Facts / XBRL | Free |
 | Parsing | BeautifulSoup + Python | Free/local |
-| Lexical retrieval | BM25 | Free/local |
+| Lexical retrieval | Custom BM25 | Free/local |
 | Embeddings | sentence-transformers | Free/local |
 | Vector search | FAISS | Free/local |
 | Reranking | local cross-encoder | Free/local |
 | Financial analytics | pandas | Free/local |
-| UI | Streamlit | Free/local |
-| Tests/evaluation | pytest + custom metrics | Free/local |
-| LLM synthesis | Optional future layer | Not required |
+| Interface | Streamlit | Free/local |
+| Evaluation | pytest + custom metrics | Free/local |
+| Paid LLM API | Not required | $0 |
 
-## Planned Portfolio Enhancements
+---
 
-The strongest next iterations are:
+## Technical Decisions
 
-- filing-to-filing narrative comparison for the same section
-- richer quarterly KPI normalization
-- company-specific retrieval benchmark with manually verified relevance labels
-- answer-level citation-support checks
-- retrieval latency measurements
-- persisted FAISS indexes instead of rebuilding on app startup
-- multi-company comparison
-- optional local LLM synthesis with strict citation constraints
-- screenshots and an architecture diagram for the final GitHub README
+### Why not use an LLM for financial calculations?
 
-## Important Data Note
+Financial arithmetic is deterministic. Revenue, cash flow, and free-cash-flow calculations come from structured SEC facts rather than generated text.
 
-SEC filings are public source documents. Model outputs and retrieved evidence should still be treated as research assistance rather than investment advice. Financial concepts can vary by issuer, taxonomy choice, and reporting period, so structured metrics should be validated when used for decision-making.
+### Why combine BM25 and embeddings?
+
+Exact terminology matters in financial filings, but research questions are often paraphrased. BM25 handles exact language well, while embeddings improve semantic matching.
+
+### Why use RRF instead of adding BM25 and vector scores?
+
+The two retrieval methods produce scores on different scales. Reciprocal Rank Fusion combines ranking positions rather than pretending the raw scores are directly comparable.
+
+### Why keep the answer layer extractive?
+
+The core goal is verifiability. Extractive answers make every displayed claim traceable to SEC evidence while keeping an optional generative layer separate from the trusted retrieval pipeline.
+
+---
+
+## Limitations and Future Work
+
+- The included retrieval benchmark contains 8 manually labeled AAPL questions; a larger benchmark would improve statistical confidence.
+- SEC HTML structures and XBRL taxonomy choices vary across issuers, so additional companies may require parser or concept-mapping adjustments.
+- Filing comparison currently focuses on retrieving the strongest topic-aligned evidence rather than generating a long-form narrative explanation.
+- Local transformer models can take several seconds to load on first use; the Streamlit app lazy-loads them and caches them for later requests.
+- A future optional LLM synthesis layer could summarize already-grounded evidence while enforcing citation constraints.
+
+---
+
+## Data and Usage Note
+
+SEC filings are public source documents. This project is intended for financial research and analytics demonstrations, not investment advice. Financial concepts can vary by issuer, taxonomy choice, and reporting period, so structured metrics should be validated before being used in production decision-making.
